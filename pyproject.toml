@@ -28,5 +28,8 @@ classifiers = [
 ]
 keywords = ["threadpool", "task-manager", "dynamic", "lightweight", "concurrency"]
 
+[project.urls]
+"Homepage" = "https://github.com/rockswang/lite-taskman"
+
 [tool.setuptools.packages.find]
 where = ["."]
