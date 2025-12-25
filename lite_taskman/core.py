@@ -26,8 +26,8 @@ def _default_cb(name: str, task_done: int, task_all: int,
     batch_info = '' if batch_all == task_all else f'batch progress {batch_done}/{batch_all}, '
     _log(f'  -- Task "{name}" progress {task_done}/{task_all}, {batch_info}elapsed {int(elapsed_sec * 1000)}ms')
 
-Task = namedtuple('Task', ['fn', 'args', 'kwargs', 'name', 'batch_size', 'extra'])
-Result = namedtuple('Result', ['name', 'result', 'extra', 'error', 'traceback'])
+Task = namedtuple('Task', ['fn', 'args', 'kwargs', 'name', 'batch_size', 'extra', 'sn'])
+Result = namedtuple('Result', ['sn', 'name', 'result', 'extra', 'error', 'traceback'])
 
 class TaskMan:
     """
@@ -48,6 +48,7 @@ class TaskMan:
         self.pool = None
         self.tasks = []
         self.queue = {}
+        self.count = 0
 
 
     def __enter__(self):
@@ -64,6 +65,7 @@ class TaskMan:
             self.pool = None
         self.queue.clear()
         self.tasks.clear()
+        self.count = 0
 
 
     def add(self, fn, *args, _tm_name=None, _tm_batch_size=1, _tm_extra=None, **kwargs):
@@ -80,7 +82,8 @@ class TaskMan:
         if not self.thread_id == get_ident(): # ensure add() not called in worker thread
             raise Exception('TaskMan.add() must be called in the same thread as __init__')
         name = _tm_name or fn.__name__
-        self.tasks.append(Task(fn, args, kwargs, name, _tm_batch_size, _tm_extra))
+        self.tasks.append(Task(fn, args, kwargs, name, _tm_batch_size, _tm_extra, self.count))
+        self.count += 1
 
 
     def process(self):
@@ -88,7 +91,7 @@ class TaskMan:
         An incremental generator that submits tasks and yields results as they complete.
         Supports adding new tasks during iteration.
         
-        :yield: Result(name, result, extra, error, traceback)
+        :yield: Result(sn, name, result, extra, error, traceback)
         """
         if not self.tasks and not self.queue: 
             return
@@ -109,20 +112,29 @@ class TaskMan:
                     t = self.queue.pop(f) # delete from queue
                     td += 1
                     bd += t.batch_size
+                    self.process_cb(t.name, td, ta, bd, ba, time() - tm) # callback for progress notification
                     try:
-                        yield Result(t.name, f.result(), t.extra, None, None)
+                        yield Result(t.sn, t.name, f.result(), t.extra, None, None)
                     except Exception as e:
-                        yield Result(t.name, None, t.extra, e, extract_tb(e.__traceback__))
-                    finally:
-                        self.process_cb(t.name, td, ta, bd, ba, time() - tm)
+                        yield Result(t.sn, t.name, None, t.extra, e, extract_tb(e.__traceback__))
     
+
+
+    def all(self):
+        """
+        Collects all results from process() and sorts them by their original sequence number.
+        Note: This will consume the entire generator and block until all tasks are complete.
+
+        :return: A list of all Result objects, ordered by task adding sequence.
+        """
+        return sorted(self.process(), key=lambda r: r.sn)
 
     def exec(self):
         """
         All-in-one execution: Start -> Process all -> Shutdown (automatically).
         
-        :return: A list of all Result objects.
+        :return: A list of all Result objects, ordered by task adding sequence.
         """
         with self:
-            return list(self.process())
+            return self.all()
 
