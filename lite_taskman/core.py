@@ -81,7 +81,7 @@ class TaskMan:
         """
         if not self.thread_id == get_ident(): # ensure add() not called in worker thread
             raise Exception('TaskMan.add() must be called in the same thread as __init__')
-        name = _tm_name or fn.__name__
+        name = _tm_name or getattr(fn, '__name__', None) or type(fn).__name__ # fn.__name__ might raise AttributeError 
         self.tasks.append(Task(fn, args, kwargs, name, _tm_batch_size, _tm_extra, self.count))
         self.count += 1
 
